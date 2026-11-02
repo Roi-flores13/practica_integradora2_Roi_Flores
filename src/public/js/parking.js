@@ -210,9 +210,11 @@ function renderReservations() {
 
     if (isCurrent) {
       const actions = makeElement('div', 'reservation-actions');
-      // TODO PRACTICE 2:
-      // Add an extension action for eligible reservations and connect it to
-      // the extension form. Keep the cancellation action working.
+
+      const extendButton = makeElement('button', 'button button-secondary', 'Extender');
+      extendButton.type = 'button';
+      extendButton.setAttribute('aria-expanded', 'false');
+
       const cancelButton = makeElement('button', 'button button-danger', 'Cancelar');
       cancelButton.type = 'button';
       cancelButton.addEventListener('click', () => {
@@ -224,8 +226,20 @@ function renderReservations() {
         }
         cancelReservation(reservation._id, cancelButton);
       });
-      actions.append(cancelButton);
+
+      actions.append(extendButton, cancelButton);
       card.append(actions);
+
+      const extendForm = createExtendForm(reservation);
+      extendForm.style.display = 'none';
+
+      extendButton.addEventListener('click', () => {
+        const isHidden = extendForm.style.display === 'none';
+        extendForm.style.display = isHidden ? 'flex' : 'none';
+        extendButton.setAttribute('aria-expanded', String(isHidden));
+      });
+
+      card.append(extendForm);
     }
     reservationsList.append(card);
   }
@@ -237,15 +251,62 @@ function createExtendForm(reservation) {
   const input = makeElement('input');
   input.type = 'datetime-local';
   input.required = true;
+
+  const currentEnd = new Date(reservation.endTime);
+  const suggestedEnd = new Date(currentEnd.getTime() + 60 * 60 * 1000);
+  input.value = localDateTime(suggestedEnd);
+
   label.append(input);
   const button = makeElement('button', 'button button-primary', 'Guardar extensión');
   button.type = 'submit';
   const message = makeElement('p', 'extend-message');
   message.setAttribute('role', 'alert');
   form.append(label, button, message);
-  // TODO PRACTICE 2:
-  // Read the requested time, send the extension request, handle the result,
-  // and refresh the affected views when the operation succeeds.
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    message.textContent = '';
+    message.className = 'extend-message';
+
+    const newEndTime = new Date(input.value);
+    if (Number.isNaN(newEndTime.getTime())) {
+      message.textContent = 'Fecha u hora inválida.';
+      return;
+    }
+
+    if (newEndTime <= currentEnd) {
+      message.textContent = 'La nueva hora de fin debe ser posterior a la actual.';
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Guardando...';
+
+    try {
+      const response = await fetch(`/api/reservations/${reservation._id}/extend`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endTime: newEndTime.toISOString() })
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        message.textContent = data.message || 'No fue posible extender la reservación.';
+        return;
+      }
+
+      await Promise.all([loadReservations(), loadSpots()]);
+      setMessage(reservationsMessage, 'Reservación extendida correctamente.', 'success');
+    } catch (error) {
+      console.error(error);
+      message.textContent = 'Error de red o comunicación con el servidor.';
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Guardar extensión';
+    }
+  });
+
   return form;
 }
 
